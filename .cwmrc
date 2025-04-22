@@ -1,11 +1,14 @@
-color	activeborder	"#915661"
-color	inactiveborder	"#484848"
-color	font		"#f2f3f4"
-color	selfont		"#f2f3f4"
-color	menubg		"#484848"
-color	menufg		"#915661"
+color		activeborder			'#202060'
+color		font				'#000000'
+color		selfont				'#e9ffe9'
+color		inactiveborder			'rgb:33/33/33'
+color		menubg				'#494949'
+color		menufg				'#202060'
 
-fontname	creep:pixelsize=12:regular"
+# Autogroups for windows.
+autogroup	0				"termbar,termbar"
+
+fontname	creep:terminus=12:regular"
 
 borderwidth	5
 gap		5 5 5 5
@@ -27,7 +30,7 @@ bind-key	4S-q		quit
 bind-key	4S-r		restart
 bind-key	4-space		menu-exec
 bind-key	4-Return	xfce4-terminal
-bind-key	4S-Return	thunar
+bind-key	4S-Return	pcmanfm
 
 bind-key	4-1		group-only-1
 bind-key	4-2		group-only-2
@@ -73,3 +76,6 @@ bind-key	4S-Tab		window-rcycle-ingroup
 
 bind-mouse	4-1		window-move
 bind-mouse	4-3		window-resize
+
+ignore						"termbar"
+
