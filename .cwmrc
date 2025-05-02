@@ -7,14 +7,13 @@ color		menufg				'#202060'
 
 # Autogroups for windows.
 autogroup	0				"termbar,termbar"
+ignore						"termbar"
 
-fontname	creep:terminus=12:regular"
+
+fontname  	"Hack:pixelsize=18:bold"
 
 borderwidth	5
 gap		5 5 5 5
-
-ignore termbar 
-autogroup 0 termbar
 
 sticky	yes
 
@@ -76,6 +75,3 @@ bind-key	4S-Tab		window-rcycle-ingroup
 
 bind-mouse	4-1		window-move
 bind-mouse	4-3		window-resize
-
-ignore						"termbar"
-
