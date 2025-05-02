@@ -1,7 +1,5 @@
 #!/bin/sh -x
 
-xrdb -merge $HOME/.Xresources
-  
 export LANG=en_US.UTF-8
 export LC_CTYPE=en_US.UTF-8
 export XMODIFIERS=@im=uim
@@ -14,8 +12,8 @@ export MOZ_WEBRENDER=1
 xset b 0 0 0
 
 # DBus
-if [ -x /usr/local/bin/dbus-launch -a -z "${DBUS_SESSION_BUS_ADDRESS}" ]; then
-	eval `dbus-launch --sh-syntax --exit-with-x11`
+if [ -z "${DBUS_SESSION_BUS_ADDRESS}" ]; then
+	eval `dbus-launch --auto-syntax --exit-with-session`
 fi
 
 # Termbar
@@ -26,6 +24,7 @@ xhost +si:localuser:root
 ulimit -Sc 0
 
 # Wallpaper
-feh --bg-scale /home/lounge/Downloads/alena-aenami-stardust.jpg  &
+feh --bg-scale /home/lounge/Pictures/nordic-wallpapers/wallpapers/ign_archie.png  &
+xfce4-terminal &
 
 exec cwm 
