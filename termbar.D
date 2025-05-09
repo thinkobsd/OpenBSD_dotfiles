@@ -1,0 +1,126 @@
+#!/bin/sh
+
+## Debug
+#set -x
+
+trap 'exec $0' HUP # Restart itself 
+trap 'tput cnorm; exit 1' INT QUIT TERM
+
+esc="\033"
+reset="${esc}[0m"
+redf="${esc}[31m"
+blackf="${esc}[90m";
+whitef="${esc}[37m"
+pipe="${whitef}|${reset}"
+
+# Network speed variables
+prev_down=0
+prev_up=0
+
+today()
+{
+	DATE=$(date '+%a %d %b %H:%M')
+}
+
+desktop_id()
+{
+	DESKTOP_ID=$(xprop -root 32c '\t$0' _NET_CURRENT_DESKTOP | cut -f 2)
+}
+
+active_window()
+{
+	WIN_ID=$(xprop -root 32x '\t$0' _NET_ACTIVE_WINDOW 2>/dev/null | cut -f 2)
+	# Fallback for empty window titles
+	WIN_TITLE=$(xprop -id "$WIN_ID" '\t$0' _NET_WM_NAME 2>/dev/null | awk -F '"' '{ print $2 }' || echo "N/A")
+	WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
+}
+
+cpu()
+{
+	CPU_TEMP=$(sysctl hw.sensors.acpithinkpad0.temp0 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1)
+	CPU_SPEED=$(printf "%4s" $(sysctl hw.cpuspeed 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1))
+}
+
+bat()
+{
+	BAT=$(apm -l 2>/dev/null)
+}
+
+bat_status()
+{
+	STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
+	[ -z "$STATUS" ] && STATUS=0
+
+	if [ "${STATUS}" -eq "1" ]; then
+		BAT_STATUS="Connected"
+	else
+		BAT_STATUS="${redf}Disconnected${reset}"
+	fi
+}
+
+mem()
+{
+	MEM=$(top -n | grep Memory | awk {'print $6'})
+}
+
+wifi()
+{
+	SSID=$(ifconfig | grep ieee | awk {'print $3'})
+}
+
+network()
+{
+	IIP=$(ifconfig iwm0 | grep inet | awk '{print $2}')
+	PIP=$(dig +short myip.opendns.com @resolver1.opendns.com | awk {'printf $1'})
+}
+
+network_speed()
+{
+	# Get current bytes received and transmitted
+	current_down=$(netstat -i -n -b -I iwm0 | awk 'NR>1 {print $7}')
+	current_up=$(netstat -i -n -b -I iwm0 | awk 'NR>1 {print $10}')
+	
+	# Calculate difference from previous values
+	down_diff=$((current_down - prev_down))
+	up_diff=$((current_up - prev_up))
+	
+	# Convert to human readable format (KB/s)
+	down_speed=$(echo "scale=1; $down_diff / 1024" | bc)
+	up_speed=$(echo "scale=1; $up_diff / 1024" | bc)
+	
+	# Store current values for next iteration
+	prev_down=$current_down
+	prev_up=$current_up
+	
+	# Format the output
+	NET_SPEED="${blackf}D:${reset} ${down_speed}KB/s ${blackf}U:${reset} ${up_speed}KB/s"
+}
+
+my_name()
+{
+	YO=$(printf "OpenBSD 7.7-current")
+}
+
+tput civis
+
+while true; do
+	today
+	desktop_id
+	active_window
+	cpu
+	mem
+	bat
+	bat_status
+	wifi
+	network
+	network_speed
+	my_name
+	
+	# Use tput ed for better screen clearing
+	tput cup 1 0
+	printf "[${DESKTOP_ID}] ${pipe} ${blackf}Win:${reset} ${WIN_TITLE} ${pipe} ${blackf}${YO}${reset} ${pipe} ${DATE} ${pipe} ${blackf}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${blackf}Mem:${reset} ${MEM} "
+	printf "${pipe} ${blackf}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${blackf}SSID:${reset}${SSID}${pipe}"
+	printf " ${blackf}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${NET_SPEED}$(tput el)" # Clear to end of line
+	
+	sleep 1
+done
