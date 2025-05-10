@@ -76,24 +76,24 @@ network()
 
 network_speed()
 {
-	# Get current bytes received and transmitted
-	current_down=$(netstat -i -n -b -I iwm0 | awk 'NR>1 {print $7}')
-	current_up=$(netstat -i -n -b -I iwm0 | awk 'NR>1 {print $10}')
-	
-	# Calculate difference from previous values
-	down_diff=$((current_down - prev_down))
-	up_diff=$((current_up - prev_up))
-	
-	# Convert to human readable format (KB/s)
-	down_speed=$(echo "scale=1; $down_diff / 1024" | bc)
-	up_speed=$(echo "scale=1; $up_diff / 1024" | bc)
-	
-	# Store current values for next iteration
-	prev_down=$current_down
-	prev_up=$current_up
-	
-	# Format the output
-	NET_SPEED="${blackf}D:${reset} ${down_speed}KB/s ${blackf}U:${reset} ${up_speed}KB/s"
+    # Get RX and TX bytes
+    current_down=$(netstat -I iwm0 | awk 'NR==2 {print $7}')
+    current_up=$(netstat -I iwm0 | awk 'NR==2 {print $10}')
+
+    # Calculate the difference from previous snapshot
+    down_diff=$((current_down - prev_down))
+    up_diff=$((current_up - prev_up))
+
+    # Convert to KB/s
+    down_speed=$(echo "scale=1; $down_diff / 1024" | bc)
+    up_speed=$(echo "scale=1; $up_diff / 1024" | bc)
+
+    # Store current bytes for next time
+    prev_down=$current_down
+    prev_up=$current_up
+
+    # Format output
+    NET_SPEED="${blackf}D:${reset} ${down_speed}KB/s ${blackf}U:${reset} ${up_speed}KB/s"
 }
 
 my_name()
@@ -120,7 +120,7 @@ while true; do
 	tput cup 1 0
 	printf "[${DESKTOP_ID}] ${pipe} ${blackf}Win:${reset} ${WIN_TITLE} ${pipe} ${blackf}${YO}${reset} ${pipe} ${DATE} ${pipe} ${blackf}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${blackf}Mem:${reset} ${MEM} "
 	printf "${pipe} ${blackf}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${blackf}SSID:${reset}${SSID}${pipe}"
-	printf " ${blackf}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${NET_SPEED}$(tput el)" # Clear to end of line
+	printf " ${NET_SPEED} ${pipe} ${blackf}IPs:${reset} ${PIP} / ${IIP}$(tput el)" # Clear to end of line
 	
 	sleep 1
 done
