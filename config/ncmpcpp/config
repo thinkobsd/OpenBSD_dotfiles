@@ -1,49 +1,140 @@
 mpd_host = ~/.config/mpd/socket
-#mpd_port = "6600"
 mpd_music_dir = "~/Music"
 execute_on_song_change="notify-send "Now playing" "$(ncmpcpp --current-song="{%a - }{%t}|{%f}")""
 
-# Display ..
-song_list_format = " {$3%a $1• $8}{%t} "
-song_status_format = " $3%a $1• $8%t $1• $2%b$1 "
-playlist_display_mode = "classic" (classic/columns)
+# General settings
+ncmpcpp_directory = ~/.config/ncmpcpp
+lyrics_directory = ~/.lyrics
+playlist_display_mode = columns
+message_delay_time = 1
+now_playing_prefix = "$b"
+now_playing_suffix = "$/b"
+browser_display_mode = columns
+search_engine_display_mode = columns
+playlist_editor_display_mode = columns
+autocenter_mode = yes
+centered_cursor = yes
+ignore_leading_the = yes
+allow_for_physical_item_deletion = no
 
-# Now Playing ..
-now_playing_prefix = "$3>>"
-now_playing_suffix = "$8$/b"
+# Visual appearance
+colors_enabled = yes
+empty_tag_color = cyan
+header_window_color = white
+volume_color = default
+state_line_color = white
+state_flags_color = default
+main_window_color = yellow
+color1 = white
+color2 = green
+progressbar_color = black
+progressbar_elapsed_color = red
+statusbar_color = default
+alternative_ui_separator_color = black
 
-# Playlist ..
-browser_playlist_prefix = "$2 ♥ $0 "
+# Window layout
+song_window_title_format = "Music"
+song_status_format = "{{%a - %t}}|{%f}"
+song_list_format = "{$4%a - $9%t$7}|{$3%f$9}"
+song_columns_list_format = (20)[blue]{tr} (5)[magenta]{l} (30)[green]{a} (30)[red]{t} (30)[yellow]{b}
 
-# Delays .. 
-playlist_disable_highlight_delay = "1"
-message_delay_time= "1"
+# Progress bar
+progressbar_look = "─╼ "
 
-# Progress Bar ..
-progressbar_look = "---"
-progressbar_color = "black"
-progressbar_elapsed_color = "black"
+# Key bindings
+def_key "j"
+    scroll_down
 
-# Colors ..
-colors_enabled = "yes"
-empty_tag_color = "red"
-statusbar_color = "black"
-state_line_color = "black"
-state_flags_color = "green"
-main_window_color = "green" 
-header_window_color = "black"
+def_key "k"
+    scroll_up
 
-# Misc ..   
-display_bitrate = "yes"
-autocenter_mode = "yes"
-centered_cursor = "yes"
-titles_visibility = "no"
-statusbar_visibility = "yes"
-empty_tag_marker=" -- ‼ -- " 
-mouse_support = "no"
-header_visibility = "no"
-display_remaining_time = "no"
-ask_before_clearing_playlists = "no"
-discard_colors_if_item_is_selected = "yes"
+def_key "J"
+    move_sort_order_down
 
+def_key "K"
+    move_sort_order_up
+
+def_key "l"
+    next_column
+
+def_key "h"
+    previous_column
+
+def_key "g"
+    page_up
+
+def_key "G"
+    page_down
+
+def_key "u"
+    page_up
+
+def_key "d"
+    page_down
+
+def_key "s"
+    show_media_library
+
+def_key "i"
+    show_playlist_editor
+
+def_key "z"
+    show_browser
+
+def_key "x"
+    show_search_engine
+
+def_key "c"
+    show_clock
+
+def_key "v"
+    show_visualizer
+
+def_key "b"
+    show_playlist
+
+def_key "Space"
+    pause
+
+def_key "n"
+    next
+
+def_key "p"
+    previous
+
+def_key ">"
+    seek_forward
+
+def_key "<"
+    seek_backward
+
+def_key "+"
+    volume_up
+
+def_key "-"
+    volume_down
+
+def_key "="
+    volume_up
+
+def_key "j"
+    scroll_down
+
+def_key "k"
+    scroll_up
+
+def_key "Enter"
+    enter
+
+def_key "Left"
+    previous_column
+
+def_key "Right"
+    next_column
+
+def_key "Up"
+    scroll_up
+
+def_key "Down"
+    scroll_down
 
