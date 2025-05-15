@@ -1,9 +1,9 @@
-color		activeborder			'#202060'
+color		activeborder		'#5c84ac'
 color		font				'#000000'
 color		selfont				'#e9ffe9'
-color		inactiveborder			'rgb:33/33/33'
-color		menubg				'#494949'
-color		menufg				'#202060'
+color		inactiveborder		'rgb:33/33/33'
+color		menubg				'#a29ba1'
+color		menufg				'#4c546c'
 
 # Autogroups for windows.
 autogroup	0				"termbar,termbar"
@@ -19,17 +19,16 @@ sticky	yes
 
 unbind-key	all
 
-bind-key	XF86MonBrightnessUp	"xbacklight -inc 10"
+bind-key	XF86MonBrightnessUp	    "xbacklight -inc 10"
 bind-key	XF86MonBrightnessDown	"xbacklight -dec 10"
-bind-key	XF86AudioMute		"amixer set Master toggle"
-bind-key	XF86AudioRaiseVolume	"amixer set Master 2+"
-bind-key	XF86AudioLowerVolume	"amixer set Master 2-"
 
 bind-key	4S-q		quit
 bind-key	4S-r		restart
 bind-key	4-space		menu-exec
 bind-key	4-Return	xfce4-terminal
-bind-key	4S-Return	pcmanfm
+bind-key	4S-Return	thunar
+bind-key    4-x        xterm
+bind-key    4S-b        chrome
 
 bind-key	4-1		group-only-1
 bind-key	4-2		group-only-2
