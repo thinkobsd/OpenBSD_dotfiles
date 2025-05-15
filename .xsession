@@ -1,3 +1,4 @@
+xhost +si:localuser:root
 #!/bin/sh -x
 
 export LANG=en_US.UTF-8
@@ -24,7 +25,8 @@ xhost +si:localuser:root
 ulimit -Sc 0
 
 # Wallpaper
-feh --bg-scale /home/lounge/Pictures/nordic-wallpapers/wallpapers/ign_archie.png  &
-xfce4-terminal &
+feh --bg-scale /home/ueulo/Pictures/nordic-wallpapers-master/ign_waifu.png  &
+xterm &
+dunst &
 
 exec cwm 
