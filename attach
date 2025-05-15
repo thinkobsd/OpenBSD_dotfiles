@@ -1,0 +1,107 @@
+#!/bin/sh
+
+# Enable debugging
+set -x
+
+# Only disks are automatically mounted
+if [ ! "$1" -eq "2" ]; then
+    exit 0
+fi
+
+# Configuration
+mountdest="/tmp/drives"
+mountdirprefix="disk-"
+disk="$2"
+letter="i"
+partition="${disk}${letter}"
+partitionpath="/dev/${partition}"
+mountdir="${mountdest}/${mountdirprefix}${partition}"
+
+# Check if the partition exists
+if ! /sbin/disklabel "$partition" >/dev/null 2>&1; then
+    logger "Partition ${partition} not found"
+    exit 0
+fi
+
+# Create mount point
+/bin/mkdir -p "$mountdir"
+/bin/chmod -R 775 "$mountdir"
+
+# Improved mount function with better error reporting
+try_mount() {
+    local fs_type=$1
+    shift
+    local options=$@
+    local mount_cmd=""
+    local result=1
+    
+    case $fs_type in
+        ufs)
+            mount_cmd="/sbin/mount"
+            ;;
+        msdos)
+            mount_cmd="/sbin/mount_msdos"
+            ;;
+        exfat)
+            # Check for different exfat implementations
+            if [ -x /sbin/mount_exfat ]; then
+                mount_cmd="/sbin/mount_exfat"
+            elif [ -x /sbin/mount.exfat-fuse ]; then
+                mount_cmd="/sbin/mount.exfat-fuse"
+            elif which mount.exfat >/dev/null 2>&1; then
+                mount_cmd="mount.exfat"
+            else
+                logger "No exFAT mount utility found"
+                return 1
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    
+    # Attempt the mount
+    if $mount_cmd -o "$options" "$partitionpath" "$mountdir" 2>/dev/null; then
+        logger "Successfully mounted ${partitionpath} as ${fs_type} at ${mountdir}"
+        return 0
+    else
+        logger "Failed to mount ${partitionpath} as ${fs_type} (options: ${options})"
+        return 1
+    fi
+}
+
+# Try mounting with different filesystems and options
+# First try exFAT with various options
+if try_mount exfat rw,nodev,noexec,nosuid; then
+    exit 0
+fi
+
+if try_mount exfat rw,nodev,noexec,nosuid,ignore_case; then
+    exit 0
+fi
+
+if try_mount exfat rw; then  # Minimal options
+    exit 0
+fi
+
+# Then try FAT32 variants
+if try_mount msdos rw,nodev,noexec,nosuid,longnames; then
+    exit 0
+fi
+
+if try_mount msdos rw,nodev,noexec,nosuid; then
+    exit 0
+fi
+
+# Finally try UFS
+if try_mount ufs rw,nodev,noexec,nosuid; then
+    exit 0
+fi
+
+# Debugging: Show partition info before failing
+logger "Mount failed, checking partition info:"
+/sbin/disklabel "$partition" | logger
+
+# Clean up and exit
+/bin/rmdir "$mountdir" 2>/dev/null
+exit 1
