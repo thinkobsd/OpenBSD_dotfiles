@@ -11,11 +11,11 @@ throttle.global_up.max_rate.set = 28
 
 pieces.hash.on_completion.set = yes
 
-directory.default.set =/home/lounge/Downloads
+directory.default.set = ~/.rtorrent/Torrent
 
-session.path.set = ~/.rtorrent.session
+session.path.set = ~/.rtorrent/session
 
-schedule2 = watch_directory,5,5,load.start=/home/lounge/watch/*.torrent
+schedule2 = watch_directory,5,5,load.start=~/.rtorrent/watch/*.torrent
 schedule2 = untied_directory,5,5,stop_untied=
 schedule2 = tied_directory,5,5,start_tied=
 
