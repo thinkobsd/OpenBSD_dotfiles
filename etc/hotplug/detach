@@ -1,0 +1,23 @@
+  #!/bin/sh
+
+  # Only disks are automatically handled
+  # See hotplugd(8)
+  if [ ! "$1" -eq "2" ];then
+      exit 0
+  fi
+
+  # The two variable below must have the same values than in the attach script.
+  mountdest="/tmp/drives"
+  mountdirprefix="disk-"
+
+  disk="$2"
+  letter="i"
+  partition=${disk}$letter
+  partitionpath=/dev/$partition
+  mountdir="$mountdest/$mountdirprefix$partition"
+
+  # When the disk is unplugged, remove the (now empty) directory created
+  # in the attach script
+  if [ -d $mountdir ];then
+      rmdir $mountdir
+  fi
