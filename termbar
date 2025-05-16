@@ -1,3 +1,4 @@
+
 #!/bin/sh
 
 ## Debug
@@ -106,11 +107,22 @@ bitcoin_price() {
     fi
 }
 
-network_speed()
-{
-    # Get RX and TX bytes
-    current_down=$(netstat -I iwm0 | awk 'NR==2 {print $7}')
-    current_up=$(netstat -I iwm0 | awk 'NR==2 {print $10}')
+network_speed() {
+    # Initialize previous values if not set
+    [ -z "$prev_down" ] && prev_down=0
+    [ -z "$prev_up" ] && prev_up=0
+
+    # Get current RX and TX bytes
+    current_stats=$(netstat -I iwm0 2>/dev/null | awk 'NR==2 {print $7,$10}')
+    
+    # Check if netstat command succeeded
+    if [ -z "$current_stats" ]; then
+        NET_SPEED="Network interface not available"
+        return 1
+    fi
+
+    current_down=$(echo "$current_stats" | awk '{print $1}')
+    current_up=$(echo "$current_stats" | awk '{print $2}')
 
     # Calculate the difference from previous snapshot
     down_diff=$((current_down - prev_down))
@@ -120,13 +132,31 @@ network_speed()
     prev_down=$current_down
     prev_up=$current_up
 
-    # Format output (now showing bytes directly)
-    NET_SPEED="${blackf}D:${reset} ${down_diff} kB/s ${blackf}U:${reset} ${up_diff} kB/s"
+    # Format download speed
+    if [ $down_diff -ge 1048576 ]; then  # 1024*1024
+        down_display=$(printf "%.1f MB/s" $(echo "scale=2; $down_diff/1048576" | bc))
+    elif [ $down_diff -ge 1024 ]; then
+        down_display=$(printf "%.1f KB/s" $(echo "scale=2; $down_diff/1024" | bc))
+    else
+        down_display="$down_diff B/s"
+    fi
+
+    # Format upload speed
+    if [ $up_diff -ge 1048576 ]; then  # 1024*1024
+        up_display=$(printf "%.1f MB/s" $(echo "scale=2; $up_diff/1048576" | bc))
+    elif [ $up_diff -ge 1024 ]; then
+        up_display=$(printf "%.1f KB/s" $(echo "scale=2; $up_diff/1024" | bc))
+    else
+        up_display="$up_diff B/s"
+    fi
+
+    # Format output
+    NET_SPEED="${blackf}D:${reset} $down_display ${blackf}U:${reset} $up_display"
 }
 
 my_name()
 {
-	YO=$(printf "OpenBSD 7.7-current")
+	YO=$(printf "OpenBSD 7.7")
 }
 
 tput civis
