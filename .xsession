@@ -1,4 +1,3 @@
-xhost +si:localuser:root
 #!/bin/sh -x
 
 export LANG=en_US.UTF-8
