@@ -11,7 +11,7 @@ esc="\033"
 reset="${esc}[0m"
 redf="${esc}[31m"
 greenf="${esc}[32m"
-blackf="${esc}[90m";
+dbluef="${esc}[34m";
 whitef="${esc}[37m"
 pipe="${whitef}|${reset}"
 
@@ -151,7 +151,7 @@ network_speed() {
     fi
 
     # Format output
-    NET_SPEED="${blackf}D:${reset} $down_display ${blackf}U:${reset} $up_display"
+    NET_SPEED="${dbluef}D:${reset} $down_display ${dbluef}U:${reset} $up_display"
 }
 
 my_name()
@@ -177,9 +177,9 @@ while true; do
 	
 	# Use tput ed for better screen clearing
 	tput cup 1 0
-	printf "[${DESKTOP_ID}] ${WIN_TITLE} ${pipe} ${blackf}${YO}${reset} ${pipe} ${DATE} ${pipe} ${blackf}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${blackf}Mem:${reset} ${MEM} "
-	printf "${pipe} ${blackf}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${blackf}SSID:${reset}${SSID}${pipe}"
-	printf " ${NET_SPEED} ${pipe} ${blackf}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE}$(tput el)" # Clear to end of line
+	printf "[${DESKTOP_ID}] ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
+	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
+	printf " ${NET_SPEED} ${pipe} ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE}$(tput el)" # Clear to end of line
 	
 	sleep 5 # Increased sleep time to avoid API rate limits
 done
