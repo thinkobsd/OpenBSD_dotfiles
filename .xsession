@@ -21,6 +21,7 @@ ulimit -Sc 0
 
 # Wallpaper
 feh --bg-scale /home/ueulo/Pictures/nordic-wallpapers-master/ign_waifu.png  &
+mpd ~/.config/mpd/mpd.conf
 xterm &
 dunst &
 
