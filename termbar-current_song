@@ -1,0 +1,241 @@
+#!/bin/sh
+
+## Debug
+#set -x
+
+trap 'exec $0' HUP # Restart itself 
+trap 'tput cnorm; exit 1' INT QUIT TERM
+
+esc="\033"
+reset="${esc}[0m"
+redf="${esc}[31m"
+greenf="${esc}[32m"
+dbluef="${esc}[34m";
+whitef="${esc}[37m"
+pipe="${whitef}|${reset}"
+
+# Network speed variables
+prev_down=0
+prev_up=0
+
+mpd_host=~/.config/mpd/socket
+
+current_song() {
+    # Check if MPD is running
+    if ! pgrep mpd >/dev/null; then
+        CURRENT_SONG="${redf}▶ MPD not running${reset}"
+        return
+    fi
+
+    # Set your MPD socket path (common locations shown)
+    SOCKET_PATH="${MPD_SOCKET:-${XDG_RUNTIME_DIR}/mpd/socket}"
+    
+    # Fallback to common locations if not found
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH=~/.config/mpd/socket  # Your custom socket path
+    fi
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH="/run/mpd/socket"
+    fi
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH="/var/run/mpd/socket"
+    fi
+
+    # Check if socket exists
+    if [ ! -S "$SOCKET_PATH" ]; then
+        CURRENT_SONG="${redf}▶ MPD socket not found${reset}"
+        return
+    fi
+
+    # Query MPD server via socket
+    RESPONSE=$(echo -e "status\ncurrentsong\nclose" | nc -U -w 1 "$SOCKET_PATH" 2>/dev/null)
+
+    # Parse status
+    STATUS=$(echo "$RESPONSE" | awk -F': ' '/^state:/ {print $2}')
+    case "$STATUS" in
+        play)   ICON="▶" ;;
+        pause)  ICON="⏸" ;;
+        *)      ICON="⏹" ;;
+    esac
+
+    # Parse song info
+    ARTIST=$(echo "$RESPONSE" | awk -F': ' '/^Artist:/ {print $2}')
+    TITLE=$(echo "$RESPONSE" | awk -F': ' '/^Title:/ {print $2}')
+    FILE=$(echo "$RESPONSE" | awk -F': ' '/^file:/ {print $2}')
+
+    if [ -n "$ARTIST" ] && [ -n "$TITLE" ]; then
+        SONG_INFO="$ARTIST - $TITLE"
+    elif [ -n "$FILE" ]; then
+        SONG_INFO=$(basename "$FILE" | sed 's/\..*$//')
+    else
+        SONG_INFO="No song"
+    fi
+
+    CURRENT_SONG="${greenf}${ICON} $(printf "%.45s" "$SONG_INFO")${reset}"
+}
+
+today()
+{
+	DATE=$(date '+%a %d %b %H:%M')
+}
+
+desktop_id()
+{
+	DESKTOP_ID=$(xprop -root 32c '\t$0' _NET_CURRENT_DESKTOP | cut -f 2)
+}
+
+active_window()
+{
+	WIN_ID=$(xprop -root 32x '\t$0' _NET_ACTIVE_WINDOW 2>/dev/null | cut -f 2)
+	# Fallback for empty window titles
+	WIN_TITLE=$(xprop -id "$WIN_ID" '\t$0' _NET_WM_NAME 2>/dev/null | awk -F '"' '{ print $2 }' || echo "N/A")
+	WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
+}
+
+cpu()
+{
+	CPU_TEMP=$(sysctl hw.sensors.acpithinkpad0.temp0 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1)
+	CPU_SPEED=$(printf "%4s" $(sysctl hw.cpuspeed 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1))
+}
+
+bat()
+{
+	BAT=$(apm -l 2>/dev/null)
+}
+
+bat_status()
+{
+	STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
+	[ -z "$STATUS" ] && STATUS=0
+
+	if [ "${STATUS}" -eq "1" ]; then
+		BAT_STATUS="Connected"
+	else
+		BAT_STATUS="${redf}Disconnected${reset}"
+	fi
+}
+
+mem()
+{
+	MEM=$(top -n | grep Memory | awk {'print $6'})
+}
+
+wifi()
+{
+	SSID=$(ifconfig | grep ieee | awk {'print $3'})
+}
+
+network()
+{
+	IIP=$(ifconfig iwm0 | grep inet | awk '{print $2}')
+	PIP=$(dig +short myip.opendns.com @resolver1.opendns.com | awk {'printf $1'})
+}
+
+bitcoin_price() {
+    # Try multiple APIs with timeout and fallback
+    BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd" | jq -r '.bitcoin.usd? // empty' 2>/dev/null)
+    
+    if [ -z "$BTC_PRICE" ]; then
+        BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.coindesk.com/v1/bpi/currentprice.json" | jq -r '.bpi.USD.rate' 2>/dev/null | tr -d ',')
+    fi
+    
+    if [ -z "$BTC_PRICE" ]; then
+        BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT" | jq -r '.price? // empty' 2>/dev/null | cut -d. -f1)
+    fi
+    
+    if [ -n "$BTC_PRICE" ]; then
+        # Format price (remove decimals if from coindesk)
+        BTC_PRICE=$(printf "%0.0f" "$BTC_PRICE")
+        BTC_PRICE="\$$BTC_PRICE"
+    else
+        # Cache last known price for when API fails
+        if [ -f /tmp/btc_price_cache ]; then
+            BTC_PRICE=$(cat /tmp/btc_price_cache)
+        else
+            BTC_PRICE="${redf}N/A${reset}"
+        fi
+    fi
+    
+    # Cache the successful price
+    if [ "$BTC_PRICE" != "${redf}N/A${reset}" ]; then
+        echo "$BTC_PRICE" > /tmp/btc_price_cache
+    fi
+}
+
+network_speed() {
+    # Initialize previous values if not set
+    [ -z "$prev_down" ] && prev_down=0
+    [ -z "$prev_up" ] && prev_up=0
+
+    # Get current RX and TX bytes
+    current_stats=$(netstat -I iwm0 2>/dev/null | awk 'NR==2 {print $7,$10}')
+    
+    # Check if netstat command succeeded
+    if [ -z "$current_stats" ]; then
+        NET_SPEED="Network interface not available"
+        return 1
+    fi
+
+    current_down=$(echo "$current_stats" | awk '{print $1}')
+    current_up=$(echo "$current_stats" | awk '{print $2}')
+
+    # Calculate the difference from previous snapshot
+    down_diff=$((current_down - prev_down))
+    up_diff=$((current_up - prev_up))
+
+    # Store current bytes for next time
+    prev_down=$current_down
+    prev_up=$current_up
+
+    # Format download speed
+    if [ $down_diff -ge 1048576 ]; then  # 1024*1024
+        down_display=$(printf "%.1f MB/s" $(echo "scale=2; $down_diff/1048576" | bc))
+    elif [ $down_diff -ge 1024 ]; then
+        down_display=$(printf "%.1f KB/s" $(echo "scale=2; $down_diff/1024" | bc))
+    else
+        down_display="$down_diff B/s"
+    fi
+
+    # Format upload speed
+    if [ $up_diff -ge 1048576 ]; then  # 1024*1024
+        up_display=$(printf "%.1f MB/s" $(echo "scale=2; $up_diff/1048576" | bc))
+    elif [ $up_diff -ge 1024 ]; then
+        up_display=$(printf "%.1f KB/s" $(echo "scale=2; $up_diff/1024" | bc))
+    else
+        up_display="$up_diff B/s"
+    fi
+
+    # Format output
+    NET_SPEED="${dbluef}D:${reset} $down_display ${dbluef}U:${reset} $up_display"
+}
+
+my_name()
+{
+	YO=$(printf "OpenBSD 7.7")
+}
+
+tput civis
+
+while true; do
+	today
+	desktop_id
+	active_window
+	cpu
+	mem
+	bat
+	bat_status
+	wifi
+	network
+	bitcoin_price
+	network_speed
+	my_name
+	current_song
+	
+	# Use tput ed for better screen clearing
+	tput cup 1 0
+	printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
+	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
+	printf " ${NET_SPEED} ${pipe} ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
+	
+	sleep 5 # Increased sleep time to avoid API rate limits
+done
