@@ -12,3 +12,5 @@ export PATH HOME TERM PS1 HISTFILE
 alias ls='colorls -FG'
 alias ll='colorls -laFG'
 alias poweroff='doas shutdown -p now'
+alias weather='curl http://wttr.in/Rakek'
+
