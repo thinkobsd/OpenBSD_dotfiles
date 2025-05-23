@@ -10,13 +10,18 @@ esc="\033"
 reset="${esc}[0m"
 redf="${esc}[31m"
 greenf="${esc}[32m"
-dbluef="${esc}[34m";
+dbluef="${esc}[34m"
 whitef="${esc}[37m"
 pipe="${whitef}|${reset}"
 
 # Network speed variables
 prev_down=0
 prev_up=0
+
+# Scrolling variables for current song
+scroll_pos=0
+scroll_length=45  # Display width for the song title
+scroll_delay=0    # Counter to control scroll speed
 
 mpd_host=~/.config/mpd/socket
 
@@ -71,68 +76,81 @@ current_song() {
         SONG_INFO="No song"
     fi
 
-    CURRENT_SONG="${greenf}${ICON} $(printf "%.45s" "$SONG_INFO")${reset}"
+    # Store the full song info for scrolling
+    FULL_SONG="$SONG_INFO"
+    song_length=${#FULL_SONG}
+
+    # If the song is shorter than the display length, no scrolling needed
+    if [ "$song_length" -le "$scroll_length" ]; then
+        CURRENT_SONG="${greenf}${ICON} ${FULL_SONG}${reset}"
+        scroll_pos=0
+        return
+    fi
+
+    # Add padding to the song title to create a looping effect
+    FULL_SONG="$FULL_SONG          $FULL_SONG"
+    song_length=${#FULL_SONG}
+
+    # Extract the portion of the song to display
+    display_song=$(echo "$FULL_SONG" | cut -c $((scroll_pos + 1))-$((scroll_pos + scroll_length)))
+
+    # Increment the scroll position
+    scroll_pos=$((scroll_pos + 1))
+    if [ "$scroll_pos" -ge "$((song_length / 2))" ]; then
+        scroll_pos=0  # Reset to loop the scrolling
+    fi
+
+    CURRENT_SONG="${greenf}${ICON} ${display_song}${reset}"
 }
 
-today()
-{
-	DATE=$(date '+%a %d %b %H:%M')
+today() {
+    DATE=$(date '+%a %d %b %H:%M')
 }
 
-desktop_id()
-{
-	DESKTOP_ID=$(xprop -root 32c '\t$0' _NET_CURRENT_DESKTOP | cut -f 2)
+desktop_id() {
+    DESKTOP_ID=$(xprop -root 32c '\t$0' _NET_CURRENT_DESKTOP | cut -f 2)
 }
 
-active_window()
-{
-	WIN_ID=$(xprop -root 32x '\t$0' _NET_ACTIVE_WINDOW 2>/dev/null | cut -f 2)
-	# Fallback for empty window titles
-	WIN_TITLE=$(xprop -id "$WIN_ID" '\t$0' _NET_WM_NAME 2>/dev/null | awk -F '"' '{ print $2 }' || echo "N/A")
-	WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
+active_window() {
+    WIN_ID=$(xprop -root 32x '\t$0' _NET_ACTIVE_WINDOW 2>/dev/null | cut -f 2)
+    WIN_TITLE=$(xprop -id "$WIN_ID" '\t$0' _NET_WM_NAME 2>/dev/null | awk -F '"' '{ print $2 }' || echo "N/A")
+    WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
 }
 
-cpu()
-{
-	CPU_TEMP=$(sysctl hw.sensors.acpithinkpad0.temp0 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1)
-	CPU_SPEED=$(printf "%4s" $(sysctl hw.cpuspeed 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1))
+cpu() {
+    CPU_TEMP=$(sysctl hw.sensors.acpithinkpad0.temp0 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1)
+    CPU_SPEED=$(printf "%4s" $(sysctl hw.cpuspeed 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1))
 }
 
-bat()
-{
-	BAT=$(apm -l 2>/dev/null)
+bat() {
+    BAT=$(apm -l 2>/dev/null)
 }
 
-bat_status()
-{
-	STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
-	[ -z "$STATUS" ] && STATUS=0
+bat_status() {
+    STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
+    [ -z "$STATUS" ] && STATUS=0
 
-	if [ "${STATUS}" -eq "1" ]; then
-		BAT_STATUS="Connected"
-	else
-		BAT_STATUS="${redf}Disconnected${reset}"
-	fi
+    if [ "${STATUS}" -eq "1" ]; then
+        BAT_STATUS="Connected"
+    else
+        BAT_STATUS="${redf}Disconnected${reset}"
+    fi
 }
 
-mem()
-{
-	MEM=$(top -n | grep Memory | awk {'print $6'})
+mem() {
+    MEM=$(top -n | grep Memory | awk {'print $6'})
 }
 
-wifi()
-{
-	SSID=$(ifconfig | grep ieee | awk {'print $3'})
+wifi() {
+    SSID=$(ifconfig | grep ieee | awk {'print $3'})
 }
 
-network()
-{
-	IIP=$(ifconfig iwm0 | grep inet | awk '{print $2}')
-	PIP=$(dig +short myip.opendns.com @resolver1.opendns.com | awk {'printf $1'})
+network() {
+    IIP=$(ifconfig iwm0 | grep inet | awk '{print $2}')
+    PIP=$(dig +short myip.opendns.com @resolver1.opendns.com | awk {'printf $1'})
 }
 
 bitcoin_price() {
-    # Try multiple APIs with timeout and fallback
     BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd" | jq -r '.bitcoin.usd? // empty' 2>/dev/null)
     
     if [ -z "$BTC_PRICE" ]; then
@@ -144,11 +162,9 @@ bitcoin_price() {
     fi
     
     if [ -n "$BTC_PRICE" ]; then
-        # Format price (remove decimals if from coindesk)
         BTC_PRICE=$(printf "%0.0f" "$BTC_PRICE")
         BTC_PRICE="\$$BTC_PRICE"
     else
-        # Cache last known price for when API fails
         if [ -f /tmp/btc_price_cache ]; then
             BTC_PRICE=$(cat /tmp/btc_price_cache)
         else
@@ -156,7 +172,6 @@ bitcoin_price() {
         fi
     fi
     
-    # Cache the successful price
     if [ "$BTC_PRICE" != "${redf}N/A${reset}" ]; then
         echo "$BTC_PRICE" > /tmp/btc_price_cache
     fi
@@ -209,33 +224,39 @@ network_speed() {
     NET_SPEED="${dbluef}D:${reset} $down_display ${dbluef}U:${reset} $up_display"
 }
 
-my_name()
-{
-	YO=$(printf "OpenBSD 7.7")
+my_name() {
+    YO=$(printf "OpenBSD 7.7")
 }
 
 tput civis
 
 while true; do
-	today
-	desktop_id
-	active_window
-	cpu
-	mem
-	bat
-	bat_status
-	wifi
-	network
-	bitcoin_price
-	network_speed
-	my_name
-	current_song
-	
-	# Use tput ed for better screen clearing
-	tput cup 1 0
-	printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
-	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
-	printf " ${NET_SPEED} ${pipe} ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
-	
-	sleep 5 # Increased sleep time to avoid API rate limits
+    # Update these less frequently to avoid API rate limits
+    if [ $((scroll_delay % 5)) -eq 0 ]; then
+        today
+        desktop_id
+        active_window
+        cpu
+        mem
+        bat
+        bat_status
+        wifi
+        network
+        bitcoin_price
+        network_speed
+        my_name
+    fi
+
+    # Update song info and scroll every loop
+    current_song
+    
+    # Display the status bar
+    tput cup 1 0
+    printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
+    printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${dbluef}SSID:${reset}${SSID} ${pipe}"
+    printf " ${NET_SPEED} ${pipe} ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
+
+    # Increment scroll delay and sleep for faster scrolling updates
+    scroll_delay=$((scroll_delay + 1))
+    sleep 0.3  # Reduced sleep time for smooth scrolling
 done
