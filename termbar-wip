@@ -1,11 +1,8 @@
 #!/bin/sh
-
 ## Debug
 #set -x
-
 trap 'exec $0' HUP # Restart itself 
 trap 'tput cnorm; exit 1' INT QUIT TERM
-
 esc="\033"
 reset="${esc}[0m"
 redf="${esc}[31m"
@@ -14,14 +11,10 @@ dbluef="${esc}[34m";
 whitef="${esc}[37m"
 pipe="${whitef}|${reset}"
 
-# Network speed variables
-prev_down=0
-prev_up=0
 scroll_pos=0
 scroll_direction=1  # 1 for forward, -1 for backward
 scroll_delay=0
 max_scroll_delay=3  # Delay between scroll steps (in iterations)
-
 mpd_host=~/.config/mpd/socket
 
 current_song() {
@@ -31,7 +24,7 @@ current_song() {
         scroll_pos=0
         return
     fi
-
+    
     # Set your MPD socket path (common locations shown)
     SOCKET_PATH="${MPD_SOCKET:-${XDG_RUNTIME_DIR}/mpd/socket}"
     
@@ -45,17 +38,17 @@ current_song() {
     if [ ! -S "$SOCKET_PATH" ]; then
         SOCKET_PATH="/var/run/mpd/socket"
     fi
-
+    
     # Check if socket exists
     if [ ! -S "$SOCKET_PATH" ]; then
         CURRENT_SONG="${redf}▶ MPD socket not found${reset}"
         scroll_pos=0
         return
     fi
-
+    
     # Query MPD server via socket
     RESPONSE=$(echo -e "status\ncurrentsong\nclose" | nc -U -w 1 "$SOCKET_PATH" 2>/dev/null)
-
+    
     # Parse status
     STATUS=$(echo "$RESPONSE" | awk -F': ' '/^state:/ {print $2}')
     case "$STATUS" in
@@ -63,12 +56,12 @@ current_song() {
         pause)  ICON="⏸" ;;
         *)      ICON="⏹" ;;
     esac
-
+    
     # Parse song info
     ARTIST=$(echo "$RESPONSE" | awk -F': ' '/^Artist:/ {print $2}')
     TITLE=$(echo "$RESPONSE" | awk -F': ' '/^Title:/ {print $2}')
     FILE=$(echo "$RESPONSE" | awk -F': ' '/^file:/ {print $2}')
-
+    
     if [ -n "$ARTIST" ] && [ -n "$TITLE" ]; then
         SONG_INFO="$ARTIST - $TITLE"
     elif [ -n "$FILE" ]; then
@@ -76,40 +69,39 @@ current_song() {
     else
         SONG_INFO="No song"
     fi
-
-    # Store the full song info for scrolling
-    FULL_SONG_INFO="$SONG_INFO"
     
     # Determine display length (45 characters)
     DISPLAY_LENGTH=45
     
+    # Get string length using POSIX-compatible method
+    song_length=$(printf "%s" "$SONG_INFO" | wc -c)
+    
     # Only scroll if the text is longer than display length
-    if [ ${#SONG_INFO} -gt $DISPLAY_LENGTH ]; then
+    if [ "$song_length" -gt $DISPLAY_LENGTH ]; then
         # Update scroll position only after delay
         if [ $scroll_delay -le 0 ]; then
             scroll_pos=$((scroll_pos + scroll_direction))
             
+            # Calculate max scroll position
+            max_scroll=$((song_length - DISPLAY_LENGTH))
+            
             # Reverse direction if at end
-            if [ $scroll_pos -ge $((${#SONG_INFO} - DISPLAY_LENGTH)) ]; then
+            if [ $scroll_pos -ge $max_scroll ]; then
                 scroll_direction=-1
                 scroll_delay=$max_scroll_delay  # Pause at end
+                scroll_pos=$max_scroll
             elif [ $scroll_pos -le 0 ]; then
                 scroll_direction=1
                 scroll_delay=$max_scroll_delay  # Pause at start
+                scroll_pos=0
             fi
         else
             scroll_delay=$((scroll_delay - 1))
         fi
         
-        # Ensure scroll position stays within bounds
-        if [ $scroll_pos -lt 0 ]; then
-            scroll_pos=0
-        elif [ $scroll_pos -gt $((${#SONG_INFO} - DISPLAY_LENGTH)) ]; then
-            scroll_pos=$((${#SONG_INFO} - DISPLAY_LENGTH))
-        fi
-        
-        # Get the substring to display
-        SCROLLING_TEXT="${SONG_INFO:$scroll_pos:$DISPLAY_LENGTH}"
+        # Extract substring using POSIX-compatible method
+        # This uses cut to extract characters from position to position+length
+        SCROLLING_TEXT=$(printf "%s" "$SONG_INFO" | cut -c$((scroll_pos + 1))-$((scroll_pos + DISPLAY_LENGTH)))
     else
         SCROLLING_TEXT="$SONG_INFO"
         scroll_pos=0
@@ -126,14 +118,76 @@ today()
 
 desktop_id()
 {
-	DESKTOP_ID=$(xprop -root 32c '\t$0' _NET_CURRENT_DESKTOP | cut -f 2)
+	# Try multiple methods to get desktop/workspace info
+	DESKTOP_ID=""
+	
+	# Method 1: Try _NET_CURRENT_DESKTOP (EWMH standard)
+	DESKTOP_ID=$(xprop -root -notype _NET_CURRENT_DESKTOP 2>/dev/null | awk '{print $3}')
+	
+	# Method 2: Try i3 workspaces if using i3
+	if [ -z "$DESKTOP_ID" ] && command -v i3-msg >/dev/null 2>&1; then
+		DESKTOP_ID=$(i3-msg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused==true).name' 2>/dev/null)
+	fi
+	
+	# Method 3: Try bspwm if using bspwm
+	if [ -z "$DESKTOP_ID" ] && command -v bspc >/dev/null 2>&1; then
+		DESKTOP_ID=$(bspc query -D -d focused --names 2>/dev/null)
+	fi
+	
+	# Method 4: Try herbstluftwm if using herbstluftwm
+	if [ -z "$DESKTOP_ID" ] && command -v herbstclient >/dev/null 2>&1; then
+		DESKTOP_ID=$(herbstclient attr tags.focus.name 2>/dev/null)
+	fi
+	
+	# Method 5: Try awesome if using awesome
+	if [ -z "$DESKTOP_ID" ] && command -v awesome-client >/dev/null 2>&1; then
+		DESKTOP_ID=$(echo 'return awful.screen.focused().selected_tag.name' | awesome-client 2>/dev/null | head -1)
+	fi
+	
+	# Method 6: Try _NET_DESKTOP_NAMES with current desktop number
+	if [ -z "$DESKTOP_ID" ]; then
+		CURRENT_NUM=$(xprop -root -notype _NET_CURRENT_DESKTOP 2>/dev/null | awk '{print $3}')
+		if [ -n "$CURRENT_NUM" ]; then
+			DESKTOP_NAMES=$(xprop -root -notype _NET_DESKTOP_NAMES 2>/dev/null | cut -d'"' -f2,4,6,8,10,12,14,16 | tr ',' '\n')
+			if [ -n "$DESKTOP_NAMES" ]; then
+				DESKTOP_ID=$(echo "$DESKTOP_NAMES" | sed -n "$((CURRENT_NUM + 1))p" | tr -d '"')
+			else
+				DESKTOP_ID="$CURRENT_NUM"
+			fi
+		fi
+	fi
+	
+	# Fallback: Use a generic identifier
+	if [ -z "$DESKTOP_ID" ]; then
+		# Try to get window manager name
+		WM_NAME=$(xprop -root -notype _NET_WM_NAME 2>/dev/null | cut -d'"' -f2)
+		if [ -n "$WM_NAME" ]; then
+			DESKTOP_ID="$WM_NAME"
+		else
+			DESKTOP_ID="Desktop"
+		fi
+	fi
+	
+	# Ensure DESKTOP_ID is not empty and truncate if too long
+	DESKTOP_ID=${DESKTOP_ID:-"0"}
+	DESKTOP_ID=$(printf "%.10s" "$DESKTOP_ID")
 }
 
 active_window()
 {
-	WIN_ID=$(xprop -root 32x '\t$0' _NET_ACTIVE_WINDOW 2>/dev/null | cut -f 2)
-	# Fallback for empty window titles
-	WIN_TITLE=$(xprop -id "$WIN_ID" '\t$0' _NET_WM_NAME 2>/dev/null | awk -F '"' '{ print $2 }' || echo "N/A")
+	WIN_ID=$(xprop -root -notype _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $5}')
+	if [ -n "$WIN_ID" ] && [ "$WIN_ID" != "0x0" ]; then
+		# Try different window title properties
+		WIN_TITLE=$(xprop -id "$WIN_ID" -notype _NET_WM_NAME 2>/dev/null | cut -d'"' -f2)
+		if [ -z "$WIN_TITLE" ]; then
+			WIN_TITLE=$(xprop -id "$WIN_ID" -notype WM_NAME 2>/dev/null | cut -d'"' -f2)
+		fi
+		if [ -z "$WIN_TITLE" ]; then
+			WIN_TITLE="Unknown Window"
+		fi
+	else
+		WIN_TITLE="No Active Window"
+	fi
 	WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
 }
 
@@ -152,7 +206,6 @@ bat_status()
 {
 	STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
 	[ -z "$STATUS" ] && STATUS=0
-
 	if [ "${STATUS}" -eq "1" ]; then
 		BAT_STATUS="Connected"
 	else
@@ -207,53 +260,6 @@ bitcoin_price() {
     fi
 }
 
-network_speed() {
-    # Initialize previous values if not set
-    [ -z "$prev_down" ] && prev_down=0
-    [ -z "$prev_up" ] && prev_up=0
-
-    # Get current RX and TX bytes
-    current_stats=$(netstat -I iwm0 2>/dev/null | awk 'NR==2 {print $7,$10}')
-    
-    # Check if netstat command succeeded
-    if [ -z "$current_stats" ]; then
-        NET_SPEED="Network interface not available"
-        return 1
-    fi
-
-    current_down=$(echo "$current_stats" | awk '{print $1}')
-    current_up=$(echo "$current_stats" | awk '{print $2}')
-
-    # Calculate the difference from previous snapshot
-    down_diff=$((current_down - prev_down))
-    up_diff=$((current_up - prev_up))
-
-    # Store current bytes for next time
-    prev_down=$current_down
-    prev_up=$current_up
-
-    # Format download speed
-    if [ $down_diff -ge 1048576 ]; then  # 1024*1024
-        down_display=$(printf "%.1f MB/s" $(echo "scale=2; $down_diff/1048576" | bc))
-    elif [ $down_diff -ge 1024 ]; then
-        down_display=$(printf "%.1f KB/s" $(echo "scale=2; $down_diff/1024" | bc))
-    else
-        down_display="$down_diff B/s"
-    fi
-
-    # Format upload speed
-    if [ $up_diff -ge 1048576 ]; then  # 1024*1024
-        up_display=$(printf "%.1f MB/s" $(echo "scale=2; $up_diff/1048576" | bc))
-    elif [ $up_diff -ge 1024 ]; then
-        up_display=$(printf "%.1f KB/s" $(echo "scale=2; $up_diff/1024" | bc))
-    else
-        up_display="$up_diff B/s"
-    fi
-
-    # Format output
-    NET_SPEED="${dbluef}D:${reset} $down_display ${dbluef}U:${reset} $up_display"
-}
-
 my_name()
 {
 	YO=$(printf "OpenBSD 7.7")
@@ -261,21 +267,17 @@ my_name()
 
 vol() {
     VOL_RAW=$(sndioctl -n output.level 2>/dev/null)
-
     if [ -z "$VOL_RAW" ]; then
         VOLUME="${redf}🔇 N/A${reset}"
         return
     fi
-
     case $VOL_RAW in
         ''|*[!0-9.]*)
             VOLUME="${redf}🔇 N/A${reset}"
             return
             ;;
     esac
-
     VOL_PCT=$(printf "%.0f" "$(echo "$VOL_RAW * 100" | bc -l)")
-
     # Choose an icon based on volume level
     if [ "$VOL_PCT" -eq 0 ]; then
         ICON="🔇"
@@ -286,11 +288,76 @@ vol() {
     else
         ICON="🔊"
     fi
-
     VOLUME="${dbluef}${ICON} ${VOL_PCT}%%${reset}"
 }
-tput civis
 
+brightness() {
+    # Try multiple methods to get brightness on OpenBSD
+    BRIGHTNESS_RAW=""
+    
+    # Method 1: Try wsconsctl for backlight control
+    BRIGHTNESS_RAW=$(wsconsctl display.brightness 2>/dev/null | cut -d= -f2)
+    
+    # Method 2: Try sysctl for Intel graphics
+    if [ -z "$BRIGHTNESS_RAW" ]; then
+        BRIGHTNESS_RAW=$(sysctl -n hw.sensors.acpivideo0.brightness0 2>/dev/null | cut -d. -f1)
+    fi
+    
+    # Method 3: Try xbacklight if available
+    if [ -z "$BRIGHTNESS_RAW" ] && command -v xbacklight >/dev/null 2>&1; then
+        BRIGHTNESS_RAW=$(xbacklight -get 2>/dev/null | cut -d. -f1)
+    fi
+    
+    # Method 4: Try reading from /sys if mounted (uncommon on OpenBSD)
+    if [ -z "$BRIGHTNESS_RAW" ] && [ -r "/sys/class/backlight/intel_backlight/brightness" ]; then
+        CURRENT_BRIGHTNESS=$(cat /sys/class/backlight/intel_backlight/brightness 2>/dev/null)
+        MAX_BRIGHTNESS=$(cat /sys/class/backlight/intel_backlight/max_brightness 2>/dev/null)
+        if [ -n "$CURRENT_BRIGHTNESS" ] && [ -n "$MAX_BRIGHTNESS" ] && [ "$MAX_BRIGHTNESS" -gt 0 ]; then
+            BRIGHTNESS_RAW=$(printf "%.0f" "$(echo "scale=2; $CURRENT_BRIGHTNESS * 100 / $MAX_BRIGHTNESS" | bc)")
+        fi
+    fi
+    
+    # If all methods fail
+    if [ -z "$BRIGHTNESS_RAW" ]; then
+        BRIGHTNESS="${redf}☀ N/A${reset}"
+        return
+    fi
+    
+    # Validate that we got a number
+    case $BRIGHTNESS_RAW in
+        ''|*[!0-9]*)
+            BRIGHTNESS="${redf}☀ N/A${reset}"
+            return
+            ;;
+    esac
+    
+    # Convert to percentage if needed (wsconsctl typically returns 0-100)
+    BRIGHT_PCT="$BRIGHTNESS_RAW"
+    
+    # Ensure percentage is within 0-100 range
+    if [ "$BRIGHT_PCT" -gt 100 ]; then
+        BRIGHT_PCT=100
+    elif [ "$BRIGHT_PCT" -lt 0 ]; then
+        BRIGHT_PCT=0
+    fi
+    
+    # Choose an icon based on brightness level
+    if [ "$BRIGHT_PCT" -eq 0 ]; then
+        ICON="🌑"
+    elif [ "$BRIGHT_PCT" -le 25 ]; then
+        ICON="🌘"
+    elif [ "$BRIGHT_PCT" -le 50 ]; then
+        ICON="🌗"
+    elif [ "$BRIGHT_PCT" -le 75 ]; then
+        ICON="🌖"
+    else
+        ICON="☀"
+    fi
+    
+    BRIGHTNESS="${dbluef}${ICON} ${BRIGHT_PCT}%%${reset}"
+}
+
+tput civis
 while true; do
 	today
 	desktop_id
@@ -302,16 +369,16 @@ while true; do
 	wifi
 	network
 	bitcoin_price
-	network_speed
 	my_name
 	current_song
 	vol
+	brightness
 	
 	# Use tput ed for better screen clearing
 	tput cup 1 0
 	printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
-	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${VOLUME} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
-	printf " ${NET_SPEED} ${pipe} ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
+	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${VOLUME} ${pipe} ${BRIGHTNESS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
+	printf " ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
 	
 	sleep 1 # Reduced sleep time for smoother scrolling
 done
