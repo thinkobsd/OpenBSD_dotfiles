@@ -377,7 +377,7 @@ while true; do
 	# Use tput ed for better screen clearing
 	tput cup 1 0
 	printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${dbluef}${YO}${reset} ${pipe} ${DATE} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
-	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${VOLUME} ${pipe} ${BRIGHTNESS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
+	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${VOLUME} ${pipe} ${BRIGHTNESS} ${pipe} ${dbluef}SSID:${reset}${SSID} ${pipe}"
 	printf " ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
 	
 	sleep 1 # Reduced sleep time for smoother scrolling
