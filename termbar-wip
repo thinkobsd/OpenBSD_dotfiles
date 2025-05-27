@@ -1,0 +1,495 @@
+#!/bin/sh
+## Debug
+#set -x
+trap 'exec $0' HUP # Restart itself 
+trap 'tput cnorm; exit 1' INT QUIT TERM
+esc="\033"
+reset="${esc}[0m"
+redf="${esc}[31m"
+greenf="${esc}[32m"
+dbluef="${esc}[34m";
+whitef="${esc}[37m"
+yellowf="${esc}[33m"
+pipe="${whitef}|${reset}"
+
+scroll_pos=0
+scroll_direction=1  # 1 for forward, -1 for backward
+scroll_delay=0
+max_scroll_delay=3  # Delay between scroll steps (in iterations)
+mpd_host=~/.config/mpd/socket
+
+# Weather configuration
+WEATHER_CACHE_FILE="/tmp/weather_cache"
+WEATHER_UPDATE_INTERVAL=1800  # 30 minutes in seconds
+WEATHER_LOCATION="Rakek"   # Default location, change to your city
+WEATHER_UNITS="metric"       # metric or imperial
+
+current_song() {
+    # Check if MPD is running
+    if ! pgrep mpd >/dev/null; then
+        CURRENT_SONG="${redf}▶ MPD not running${reset}"
+        scroll_pos=0
+        return
+    fi
+    
+    # Set your MPD socket path (common locations shown)
+    SOCKET_PATH="${MPD_SOCKET:-${XDG_RUNTIME_DIR}/mpd/socket}"
+    
+    # Fallback to common locations if not found
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH=~/.config/mpd/socket  # Your custom socket path
+    fi
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH="/run/mpd/socket"
+    fi
+    if [ ! -S "$SOCKET_PATH" ]; then
+        SOCKET_PATH="/var/run/mpd/socket"
+    fi
+    
+    # Check if socket exists
+    if [ ! -S "$SOCKET_PATH" ]; then
+        CURRENT_SONG="${redf}▶ MPD socket not found${reset}"
+        scroll_pos=0
+        return
+    fi
+    
+    # Query MPD server via socket
+    RESPONSE=$(echo -e "status\ncurrentsong\nclose" | nc -U -w 1 "$SOCKET_PATH" 2>/dev/null)
+    
+    # Parse status
+    STATUS=$(echo "$RESPONSE" | awk -F': ' '/^state:/ {print $2}')
+    case "$STATUS" in
+        play)   ICON="▶" ;;
+        pause)  ICON="⏸" ;;
+        *)      ICON="⏹" ;;
+    esac
+    
+    # Parse song info
+    ARTIST=$(echo "$RESPONSE" | awk -F': ' '/^Artist:/ {print $2}')
+    TITLE=$(echo "$RESPONSE" | awk -F': ' '/^Title:/ {print $2}')
+    FILE=$(echo "$RESPONSE" | awk -F': ' '/^file:/ {print $2}')
+    
+    if [ -n "$ARTIST" ] && [ -n "$TITLE" ]; then
+        SONG_INFO="$ARTIST - $TITLE"
+    elif [ -n "$FILE" ]; then
+        SONG_INFO=$(basename "$FILE" | sed 's/\..*$//')
+    else
+        SONG_INFO="No song"
+    fi
+    
+    # Determine display length (45 characters)
+    DISPLAY_LENGTH=45
+    
+    # Get string length using POSIX-compatible method
+    song_length=$(printf "%s" "$SONG_INFO" | wc -c)
+    
+    # Only scroll if the text is longer than display length
+    if [ "$song_length" -gt $DISPLAY_LENGTH ]; then
+        # Update scroll position only after delay
+        if [ $scroll_delay -le 0 ]; then
+            scroll_pos=$((scroll_pos + scroll_direction))
+            
+            # Calculate max scroll position
+            max_scroll=$((song_length - DISPLAY_LENGTH))
+            
+            # Reverse direction if at end
+            if [ $scroll_pos -ge $max_scroll ]; then
+                scroll_direction=-1
+                scroll_delay=$max_scroll_delay  # Pause at end
+                scroll_pos=$max_scroll
+            elif [ $scroll_pos -le 0 ]; then
+                scroll_direction=1
+                scroll_delay=$max_scroll_delay  # Pause at start
+                scroll_pos=0
+            fi
+        else
+            scroll_delay=$((scroll_delay - 1))
+        fi
+        
+        # Extract substring using POSIX-compatible method
+        # This uses cut to extract characters from position to position+length
+        SCROLLING_TEXT=$(printf "%s" "$SONG_INFO" | cut -c$((scroll_pos + 1))-$((scroll_pos + DISPLAY_LENGTH)))
+    else
+        SCROLLING_TEXT="$SONG_INFO"
+        scroll_pos=0
+        scroll_delay=0
+    fi
+    
+    CURRENT_SONG="${greenf}${ICON} ${SCROLLING_TEXT}${reset}"
+}
+
+today()
+{
+	DATE=$(date '+%a %d %b %H:%M')
+}
+
+desktop_id()
+{
+	# Try multiple methods to get desktop/workspace info
+	DESKTOP_ID=""
+	
+	# Method 1: Try _NET_CURRENT_DESKTOP (EWMH standard)
+	DESKTOP_ID=$(xprop -root -notype _NET_CURRENT_DESKTOP 2>/dev/null | awk '{print $3}')
+	
+	# Method 2: Try i3 workspaces if using i3
+	if [ -z "$DESKTOP_ID" ] && command -v i3-msg >/dev/null 2>&1; then
+		DESKTOP_ID=$(i3-msg -t get_workspaces 2>/dev/null | jq -r '.[] | select(.focused==true).name' 2>/dev/null)
+	fi
+	
+	# Method 3: Try bspwm if using bspwm
+	if [ -z "$DESKTOP_ID" ] && command -v bspc >/dev/null 2>&1; then
+		DESKTOP_ID=$(bspc query -D -d focused --names 2>/dev/null)
+	fi
+	
+	# Method 4: Try herbstluftwm if using herbstluftwm
+	if [ -z "$DESKTOP_ID" ] && command -v herbstclient >/dev/null 2>&1; then
+		DESKTOP_ID=$(herbstclient attr tags.focus.name 2>/dev/null)
+	fi
+	
+	# Method 5: Try awesome if using awesome
+	if [ -z "$DESKTOP_ID" ] && command -v awesome-client >/dev/null 2>&1; then
+		DESKTOP_ID=$(echo 'return awful.screen.focused().selected_tag.name' | awesome-client 2>/dev/null | head -1)
+	fi
+	
+	# Method 6: Try _NET_DESKTOP_NAMES with current desktop number
+	if [ -z "$DESKTOP_ID" ]; then
+		CURRENT_NUM=$(xprop -root -notype _NET_CURRENT_DESKTOP 2>/dev/null | awk '{print $3}')
+		if [ -n "$CURRENT_NUM" ]; then
+			DESKTOP_NAMES=$(xprop -root -notype _NET_DESKTOP_NAMES 2>/dev/null | cut -d'"' -f2,4,6,8,10,12,14,16 | tr ',' '\n')
+			if [ -n "$DESKTOP_NAMES" ]; then
+				DESKTOP_ID=$(echo "$DESKTOP_NAMES" | sed -n "$((CURRENT_NUM + 1))p" | tr -d '"')
+			else
+				DESKTOP_ID="$CURRENT_NUM"
+			fi
+		fi
+	fi
+	
+	# Fallback: Use a generic identifier
+	if [ -z "$DESKTOP_ID" ]; then
+		# Try to get window manager name
+		WM_NAME=$(xprop -root -notype _NET_WM_NAME 2>/dev/null | cut -d'"' -f2)
+		if [ -n "$WM_NAME" ]; then
+			DESKTOP_ID="$WM_NAME"
+		else
+			DESKTOP_ID="Desktop"
+		fi
+	fi
+	
+	# Ensure DESKTOP_ID is not empty and truncate if too long
+	DESKTOP_ID=${DESKTOP_ID:-"0"}
+	DESKTOP_ID=$(printf "%.10s" "$DESKTOP_ID")
+}
+
+active_window()
+{
+	WIN_ID=$(xprop -root -notype _NET_ACTIVE_WINDOW 2>/dev/null | awk '{print $5}')
+	if [ -n "$WIN_ID" ] && [ "$WIN_ID" != "0x0" ]; then
+		# Try different window title properties
+		WIN_TITLE=$(xprop -id "$WIN_ID" -notype _NET_WM_NAME 2>/dev/null | cut -d'"' -f2)
+		if [ -z "$WIN_TITLE" ]; then
+			WIN_TITLE=$(xprop -id "$WIN_ID" -notype WM_NAME 2>/dev/null | cut -d'"' -f2)
+		fi
+		if [ -z "$WIN_TITLE" ]; then
+			WIN_TITLE="Unknown Window"
+		fi
+	else
+		WIN_TITLE="No Active Window"
+	fi
+	WIN_TITLE=$(printf "%.50s" "$WIN_TITLE") # Truncate to 50 characters
+}
+
+cpu()
+{
+	CPU_TEMP=$(sysctl hw.sensors.acpithinkpad0.temp0 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1)
+	CPU_SPEED=$(printf "%4s" $(sysctl hw.cpuspeed 2>/dev/null | cut -d "=" -f 2 | cut -d "." -f 1))
+}
+
+bat()
+{
+	BAT=$(apm -l 2>/dev/null)
+}
+
+bat_status()
+{
+	STATUS=$(sysctl hw.sensors.acpiac0.indicator0 2>/dev/null | grep -c On)
+	[ -z "$STATUS" ] && STATUS=0
+	if [ "${STATUS}" -eq "1" ]; then
+		BAT_STATUS="Connected"
+	else
+		BAT_STATUS="${redf}Disconnected${reset}"
+	fi
+}
+
+mem()
+{
+	MEM=$(top -n | grep Memory | awk {'print $6'})
+}
+
+wifi()
+{
+	SSID=$(ifconfig | grep ieee | awk {'print $3'})
+}
+
+network()
+{
+	IIP=$(ifconfig iwm0 | grep inet | awk '{print $2}')
+	PIP=$(dig +short myip.opendns.com @resolver1.opendns.com | awk {'printf $1'})
+}
+
+bitcoin_price() {
+    # Try multiple APIs with timeout and fallback
+    BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd" | jq -r '.bitcoin.usd? // empty' 2>/dev/null)
+    
+    if [ -z "$BTC_PRICE" ]; then
+        BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.coindesk.com/v1/bpi/currentprice.json" | jq -r '.bpi.USD.rate' 2>/dev/null | tr -d ',')
+    fi
+    
+    if [ -z "$BTC_PRICE" ]; then
+        BTC_PRICE=$(curl -s --connect-timeout 2 "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT" | jq -r '.price? // empty' 2>/dev/null | cut -d. -f1)
+    fi
+    
+    if [ -n "$BTC_PRICE" ]; then
+        # Format price (remove decimals if from coindesk)
+        BTC_PRICE=$(printf "%0.0f" "$BTC_PRICE")
+        BTC_PRICE="\$$BTC_PRICE"
+    else
+        # Cache last known price for when API fails
+        if [ -f /tmp/btc_price_cache ]; then
+            BTC_PRICE=$(cat /tmp/btc_price_cache)
+        else
+            BTC_PRICE="${redf}N/A${reset}"
+        fi
+    fi
+    
+    # Cache the successful price
+    if [ "$BTC_PRICE" != "${redf}N/A${reset}" ]; then
+        echo "$BTC_PRICE" > /tmp/btc_price_cache
+    fi
+}
+
+vol() {
+    VOL_RAW=$(sndioctl -n output.level 2>/dev/null)
+    if [ -z "$VOL_RAW" ]; then
+        VOLUME="${redf}🔇 N/A${reset}"
+        return
+    fi
+    case $VOL_RAW in
+        ''|*[!0-9.]*)
+            VOLUME="${redf}🔇 N/A${reset}"
+            return
+            ;;
+    esac
+    VOL_PCT=$(printf "%.0f" "$(echo "$VOL_RAW * 100" | bc -l)")
+    # Choose an icon based on volume level
+    if [ "$VOL_PCT" -eq 0 ]; then
+        ICON="🔇"
+    elif [ "$VOL_PCT" -le 30 ]; then
+        ICON="🔈"
+    elif [ "$VOL_PCT" -le 70 ]; then
+        ICON="🔉"
+    else
+        ICON="🔊"
+    fi
+    VOLUME="${dbluef}${ICON} ${VOL_PCT}%%${reset}"
+}
+
+brightness() {
+    # Try multiple methods to get brightness on OpenBSD
+    BRIGHTNESS_RAW=""
+    
+    # Method 1: Try wsconsctl for backlight control
+    BRIGHTNESS_RAW=$(wsconsctl display.brightness 2>/dev/null | cut -d= -f2)
+    
+    # Method 2: Try sysctl for Intel graphics
+    if [ -z "$BRIGHTNESS_RAW" ]; then
+        BRIGHTNESS_RAW=$(sysctl -n hw.sensors.acpivideo0.brightness0 2>/dev/null | cut -d. -f1)
+    fi
+    
+    # Method 3: Try xbacklight if available
+    if [ -z "$BRIGHTNESS_RAW" ] && command -v xbacklight >/dev/null 2>&1; then
+        BRIGHTNESS_RAW=$(xbacklight -get 2>/dev/null | cut -d. -f1)
+    fi
+    
+    # Method 4: Try reading from /sys if mounted (uncommon on OpenBSD)
+    if [ -z "$BRIGHTNESS_RAW" ] && [ -r "/sys/class/backlight/intel_backlight/brightness" ]; then
+        CURRENT_BRIGHTNESS=$(cat /sys/class/backlight/intel_backlight/brightness 2>/dev/null)
+        MAX_BRIGHTNESS=$(cat /sys/class/backlight/intel_backlight/max_brightness 2>/dev/null)
+        if [ -n "$CURRENT_BRIGHTNESS" ] && [ -n "$MAX_BRIGHTNESS" ] && [ "$MAX_BRIGHTNESS" -gt 0 ]; then
+            BRIGHTNESS_RAW=$(printf "%.0f" "$(echo "scale=2; $CURRENT_BRIGHTNESS * 100 / $MAX_BRIGHTNESS" | bc)")
+        fi
+    fi
+    
+    # If all methods fail
+    if [ -z "$BRIGHTNESS_RAW" ]; then
+        BRIGHTNESS="${redf}☀ N/A${reset}"
+        return
+    fi
+    
+    # Validate that we got a number
+    case $BRIGHTNESS_RAW in
+        ''|*[!0-9]*)
+            BRIGHTNESS="${redf}☀ N/A${reset}"
+            return
+            ;;
+    esac
+    
+    # Convert to percentage if needed (wsconsctl typically returns 0-100)
+    BRIGHT_PCT="$BRIGHTNESS_RAW"
+    
+    # Ensure percentage is within 0-100 range
+    if [ "$BRIGHT_PCT" -gt 100 ]; then
+        BRIGHT_PCT=100
+    elif [ "$BRIGHT_PCT" -lt 0 ]; then
+        BRIGHT_PCT=0
+    fi
+    
+    # Choose an icon based on brightness level
+    if [ "$BRIGHT_PCT" -eq 0 ]; then
+        ICON="🌑"
+    elif [ "$BRIGHT_PCT" -le 25 ]; then
+        ICON="🌘"
+    elif [ "$BRIGHT_PCT" -le 50 ]; then
+        ICON="🌗"
+    elif [ "$BRIGHT_PCT" -le 75 ]; then
+        ICON="🌖"
+    else
+        ICON="☀"
+    fi
+    
+    BRIGHTNESS="${dbluef}${ICON} ${BRIGHT_PCT}%%${reset}"
+}
+
+get_weather() {
+    # Check if cache is recent enough
+    if [ -f "$WEATHER_CACHE_FILE" ]; then
+        cache_age=$(($(date +%s) - $(stat -c %Y "$WEATHER_CACHE_FILE" 2>/dev/null || stat -f %m "$WEATHER_CACHE_FILE" 2>/dev/null)))
+        if [ "$cache_age" -lt "$WEATHER_UPDATE_INTERVAL" ]; then
+            WEATHER_INFO=$(cat "$WEATHER_CACHE_FILE")
+            return
+        fi
+    fi
+
+    # Try different weather APIs
+    # 1. wttr.in (simple and reliable)
+    WEATHER_INFO=$(curl -s --connect-timeout 2 "https://wttr.in/${WEATHER_LOCATION}?format=%c+%t+%w" 2>/dev/null)
+    
+    # 2. Fallback to OpenWeatherMap if wttr.in fails
+    if [ -z "$WEATHER_INFO" ]; then
+        # You'll need to get your own API key from openweathermap.org
+        OWM_API_KEY="your_api_key_here"  # Replace with your actual API key
+        if [ -n "$OWM_API_KEY" ]; then
+            weather_data=$(curl -s --connect-timeout 2 "https://api.openweathermap.org/data/2.5/weather?q=${WEATHER_LOCATION}&units=${WEATHER_UNITS}&appid=${OWM_API_KEY}")
+            if [ -n "$weather_data" ]; then
+                temp=$(echo "$weather_data" | jq -r '.main.temp? // empty' | cut -d. -f1)
+                condition=$(echo "$weather_data" | jq -r '.weather[0].main? // empty')
+                wind=$(echo "$weather_data" | jq -r '.wind.speed? // empty' | cut -d. -f1)
+                
+                # Map condition to emoji
+                case "$condition" in
+                    "Clear") icon="☀️" ;;
+                    "Clouds") icon="☁️" ;;
+                    "Rain") icon="🌧️" ;;
+                    "Drizzle") icon="🌦️" ;;
+                    "Thunderstorm") icon="⛈️" ;;
+                    "Snow") icon="❄️" ;;
+                    "Mist"|"Fog") icon="🌫️" ;;
+                    *) icon="🌈" ;;
+                esac
+                
+                WEATHER_INFO="${icon} ${temp}°C ${wind}m/s"
+            fi
+        fi
+    fi
+    
+    # 3. Fallback to simple geo IP based weather if others fail
+    if [ -z "$WEATHER_INFO" ]; then
+        WEATHER_INFO=$(curl -s --connect-timeout 2 "https://wttr.in/?format=%c+%t" 2>/dev/null)
+    fi
+    
+    # If we got weather data, cache it
+    if [ -n "$WEATHER_INFO" ]; then
+        echo "$WEATHER_INFO" > "$WEATHER_CACHE_FILE"
+    else
+        # Use cached data even if it's old when API fails
+        if [ -f "$WEATHER_CACHE_FILE" ]; then
+            WEATHER_INFO=$(cat "$WEATHER_CACHE_FILE")
+        else
+            WEATHER_INFO="${redf}No weather data${reset}"
+        fi
+    fi
+}
+
+network_speed() {
+    # Define color variables (if not already set)
+    redf='\033[31m'
+    dbluef='\033[34m'
+    reset='\033[0m'
+
+    # Check if interface exists
+    INTERFACE="iwm0"
+    if ! ifconfig "$INTERFACE" >/dev/null 2>&1; then
+        NET_SPEED="${redf}↓ N/A (invalid interface)${reset}"
+        return
+    fi
+
+    # Check if ifstat is installed
+    if command -v ifstat >/dev/null 2>&1; then
+        # Use ifstat to get download speed (in KB/s)
+        DOWNLOAD_SPEED=$(ifstat -i "$INTERFACE" 1 1 2>/dev/null | tail -1 | awk '{print $1}')
+        if [ -z "$DOWNLOAD_SPEED" ] || [ "$DOWNLOAD_SPEED" = "0.0" ]; then
+            NET_SPEED="${redf}↓ N/A${reset}"
+        else
+            DOWNLOAD_SPEED=$(printf "%.1f" "$DOWNLOAD_SPEED")" KB/s"
+            NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED}${reset}"
+        fi
+    else
+        # Fallback to netstat
+        NETSTAT_FILE="/tmp/netstat_tmp_$$" # Use PID to avoid conflicts
+        NETSTAT_CURRENT=$(netstat -ib -I "$INTERFACE" 2>/dev/null | grep "$INTERFACE" | awk '{print $7}') # Adjust column if needed
+        if [ -f "$NETSTAT_FILE" ]; then
+            NETSTAT_PREV=$(cat "$NETSTAT_FILE")
+            if [ -n "$NETSTAT_CURRENT" ] && [ -n "$NETSTAT_PREV" ]; then
+                DOWNLOAD_SPEED=$(( (NETSTAT_CURRENT - NETSTAT_PREV) / 1024 )) # KB/s over 1 second
+                if [ "$DOWNLOAD_SPEED" -lt 0 ]; then
+                    DOWNLOAD_SPEED=0
+                fi
+                NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED} KB/s${reset}"
+            else
+                NET_SPEED="${redf}↓ N/A${reset}"
+            fi
+        else
+            NET_SPEED="${redf}↓ N/A${reset}"
+        fi
+        # Save current value for next iteration
+        [ -n "$NETSTAT_CURRENT" ] && echo "$NETSTAT_CURRENT" > "$NETSTAT_FILE"
+        # Ensure at least 1-second gap for next sample
+        sleep 1
+    fi
+}
+
+tput civis
+while true; do
+	today
+	desktop_id
+	active_window
+	cpu
+	mem
+	bat
+	bat_status
+	wifi
+	network
+	bitcoin_price
+	current_song
+	vol
+	brightness
+	get_weather
+	network_speed
+	
+	# Use tput ed for better screen clearing
+	tput cup 1 0
+	printf "[${DESKTOP_ID}] ${pipe} ${WIN_TITLE} ${pipe} ${DATE} ${pipe} ${yellowf}${WEATHER_INFO}${reset} ${pipe} ${dbluef}CPU:${reset} ${CPU_SPEED} MHz (${CPU_TEMP}°) ${pipe} ${dbluef}Mem:${reset} ${MEM} "
+	printf "${pipe} ${dbluef}Bat:${reset} $BAT - ${BAT_STATUS} ${pipe} ${VOLUME} ${pipe} ${BRIGHTNESS} ${pipe} ${dbluef}SSID:${reset}${SSID}${pipe}"
+	printf " ${dbluef}IPs:${reset} ${PIP} / ${IIP} ${pipe} ${NET_SPEED} ${pipe} ${greenf}BTC:${reset} ${BTC_PRICE} ${pipe} ${CURRENT_SONG}$(tput el)" # Clear to end of line
+	
+	sleep 1 # Reduced sleep time for smoother scrolling
+done
