@@ -12,10 +12,6 @@ whitef="${esc}[37m"
 yellowf="${esc}[33m"
 pipe="${whitef}|${reset}"
 
-scroll_pos=0
-scroll_direction=1  # 1 for forward, -1 for backward
-scroll_delay=0
-max_scroll_delay=3  # Delay between scroll steps (in iterations)
 mpd_host=~/.config/mpd/socket
 
 # Weather configuration
@@ -24,20 +20,35 @@ WEATHER_UPDATE_INTERVAL=1800  # 30 minutes in seconds
 WEATHER_LOCATION="Rakek"   # Default location, change to your city
 WEATHER_UNITS="metric"       # metric or imperial
 
+# Global scroll variables - IMPORTANT for persistent scrolling state
+scroll_pos=0
+scroll_direction=1
+scroll_delay=0
+max_scroll_delay=10 # Pause duration at ends
+
+# Function definition
 current_song() {
+    # No need to initialize scroll variables here anymore, as they are global
+    # scroll_pos=${scroll_pos:-0} # Remove or comment out these lines
+    # scroll_direction=${scroll_direction:-1}
+    # scroll_delay=${scroll_delay:-0}
+    # max_scroll_delay=${max_scroll_delay:-10}
+
     # Check if MPD is running
     if ! pgrep mpd >/dev/null; then
         CURRENT_SONG="${redf}▶ MPD not running${reset}"
-        scroll_pos=0
+        scroll_pos=0 # Reset scroll_pos if MPD isn't running
+        scroll_delay=0 # Reset delay too
+        scroll_direction=1 # Reset direction too
         return
     fi
-    
+
     # Set your MPD socket path (common locations shown)
     SOCKET_PATH="${MPD_SOCKET:-${XDG_RUNTIME_DIR}/mpd/socket}"
-    
+
     # Fallback to common locations if not found
     if [ ! -S "$SOCKET_PATH" ]; then
-        SOCKET_PATH=~/.config/mpd/socket  # Your custom socket path
+        SOCKET_PATH=~/.config/mpd/socket # Your custom socket path
     fi
     if [ ! -S "$SOCKET_PATH" ]; then
         SOCKET_PATH="/run/mpd/socket"
@@ -45,17 +56,19 @@ current_song() {
     if [ ! -S "$SOCKET_PATH" ]; then
         SOCKET_PATH="/var/run/mpd/socket"
     fi
-    
+
     # Check if socket exists
     if [ ! -S "$SOCKET_PATH" ]; then
         CURRENT_SONG="${redf}▶ MPD socket not found${reset}"
-        scroll_pos=0
+        scroll_pos=0 # Reset scroll_pos
+        scroll_delay=0
+        scroll_direction=1
         return
     fi
-    
+
     # Query MPD server via socket
     RESPONSE=$(echo -e "status\ncurrentsong\nclose" | nc -U -w 1 "$SOCKET_PATH" 2>/dev/null)
-    
+
     # Parse status
     STATUS=$(echo "$RESPONSE" | awk -F': ' '/^state:/ {print $2}')
     case "$STATUS" in
@@ -63,12 +76,12 @@ current_song() {
         pause)  ICON="⏸" ;;
         *)      ICON="⏹" ;;
     esac
-    
+
     # Parse song info
     ARTIST=$(echo "$RESPONSE" | awk -F': ' '/^Artist:/ {print $2}')
     TITLE=$(echo "$RESPONSE" | awk -F': ' '/^Title:/ {print $2}')
     FILE=$(echo "$RESPONSE" | awk -F': ' '/^file:/ {print $2}')
-    
+
     if [ -n "$ARTIST" ] && [ -n "$TITLE" ]; then
         SONG_INFO="$ARTIST - $TITLE"
     elif [ -n "$FILE" ]; then
@@ -76,45 +89,76 @@ current_song() {
     else
         SONG_INFO="No song"
     fi
-    
+
     # Determine display length (45 characters)
     DISPLAY_LENGTH=45
-    
-    # Get string length using POSIX-compatible method
+
+    # Get string length using POSIX-compatible method (byte count)
+    # Be aware: wc -c counts bytes, not characters. For multi-byte chars, this can be an issue.
+    # If you need true character length for UTF-8, you'd need awk or a more robust tool.
     song_length=$(printf "%s" "$SONG_INFO" | wc -c)
-    
+
     # Only scroll if the text is longer than display length
     if [ "$song_length" -gt $DISPLAY_LENGTH ]; then
         # Update scroll position only after delay
         if [ $scroll_delay -le 0 ]; then
             scroll_pos=$((scroll_pos + scroll_direction))
-            
+
             # Calculate max scroll position
             max_scroll=$((song_length - DISPLAY_LENGTH))
-            
+
+            # Ensure max_scroll is not negative
+            if [ $max_scroll -lt 0 ]; then
+                max_scroll=0
+            fi
+
             # Reverse direction if at end
             if [ $scroll_pos -ge $max_scroll ]; then
                 scroll_direction=-1
-                scroll_delay=$max_scroll_delay  # Pause at end
-                scroll_pos=$max_scroll
+                scroll_delay=$max_scroll_delay # Pause at end
+                scroll_pos=$max_scroll # Ensure it stays at max
             elif [ $scroll_pos -le 0 ]; then
                 scroll_direction=1
-                scroll_delay=$max_scroll_delay  # Pause at start
-                scroll_pos=0
+                scroll_delay=$max_scroll_delay # Pause at start
+                scroll_pos=0 # Ensure it stays at 0
             fi
         else
             scroll_delay=$((scroll_delay - 1))
         fi
-        
-        # Extract substring using POSIX-compatible method
-        # This uses cut to extract characters from position to position+length
-        SCROLLING_TEXT=$(printf "%s" "$SONG_INFO" | cut -c$((scroll_pos + 1))-$((scroll_pos + DISPLAY_LENGTH)))
+
+        # Ensure scroll_pos is within bounds (redundant after above checks but harmless)
+        if [ $scroll_pos -lt 0 ]; then
+            scroll_pos=0
+        fi
+        if [ $scroll_pos -gt $((song_length - DISPLAY_LENGTH)) ]; then
+            scroll_pos=$((song_length - DISPLAY_LENGTH))
+        fi
+
+        # Extract substring using POSIX-compatible method with proper bounds checking
+        start_pos=$((scroll_pos + 1)) # cut -c is 1-indexed
+        end_pos=$((scroll_pos + DISPLAY_LENGTH))
+
+        # Make sure we don't exceed string length
+        if [ $end_pos -gt $song_length ]; then
+            end_pos=$song_length
+        fi
+
+        SCROLLING_TEXT=$(printf "%s" "$SONG_INFO" | cut -c${start_pos}-${end_pos})
+
+        # Pad with spaces if needed to maintain consistent width
+        current_length=$(printf "%s" "$SCROLLING_TEXT" | wc -c)
+        if [ $current_length -lt $DISPLAY_LENGTH ]; then
+            padding=$((DISPLAY_LENGTH - current_length))
+            SCROLLING_TEXT="${SCROLLING_TEXT}$(printf '%*s' $padding '')"
+        fi
     else
         SCROLLING_TEXT="$SONG_INFO"
+        # Reset scroll variables for short text when no scrolling is needed
         scroll_pos=0
         scroll_delay=0
+        scroll_direction=1
     fi
-    
+
     CURRENT_SONG="${greenf}${ICON} ${SCROLLING_TEXT}${reset}"
 }
 
@@ -428,39 +472,56 @@ network_speed() {
     # Check if interface exists
     INTERFACE="iwm0"
     if ! ifconfig "$INTERFACE" >/dev/null 2>&1; then
-        NET_SPEED="${redf}↓ N/A (invalid interface)${reset}"
+        NET_SPEED="${redf}↓ N/A ↑ N/A${reset}"
         return
     fi
 
     # Check if ifstat is installed
     if command -v ifstat >/dev/null 2>&1; then
-        # Use ifstat to get download speed (in KB/s)
-        DOWNLOAD_SPEED=$(ifstat -i "$INTERFACE" 1 1 2>/dev/null | tail -1 | awk '{print $1}')
+        # Use ifstat to get download and upload speeds (in KB/s)
+        SPEEDS=$(ifstat -i "$INTERFACE" 1 1 2>/dev/null | tail -1 | awk '{print $1 " " $2}')
+        DOWNLOAD_SPEED=$(echo "$SPEEDS" | awk '{print $1}')
+        UPLOAD_SPEED=$(echo "$SPEEDS" | awk '{print $2}')
+        
         if [ -z "$DOWNLOAD_SPEED" ] || [ "$DOWNLOAD_SPEED" = "0.0" ]; then
-            NET_SPEED="${redf}↓ N/A${reset}"
+            DOWNLOAD_SPEED="N/A"
         else
             DOWNLOAD_SPEED=$(printf "%.1f" "$DOWNLOAD_SPEED")" KB/s"
-            NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED}${reset}"
         fi
+        
+        if [ -z "$UPLOAD_SPEED" ] || [ "$UPLOAD_SPEED" = "0.0" ]; then
+            UPLOAD_SPEED="N/A"
+        else
+            UPLOAD_SPEED=$(printf "%.1f" "$UPLOAD_SPEED")" KB/s"
+        fi
+        
+        NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED} ↑ ${UPLOAD_SPEED}${reset}"
     else
         # Fallback to netstat
         NETSTAT_FILE="/tmp/netstat_tmp_$$" # Use PID to avoid conflicts
-        NETSTAT_CURRENT=$(netstat -ib -I "$INTERFACE" 2>/dev/null | grep "$INTERFACE" | awk '{print $7}') # Adjust column if needed
+        NETSTAT_CURRENT=$(netstat -ib -I "$INTERFACE" 2>/dev/null | grep "$INTERFACE" | awk '{print $7 " " $10}') # $7 for input, $10 for output
         if [ -f "$NETSTAT_FILE" ]; then
             NETSTAT_PREV=$(cat "$NETSTAT_FILE")
             if [ -n "$NETSTAT_CURRENT" ] && [ -n "$NETSTAT_PREV" ]; then
-                DOWNLOAD_SPEED=$(( (NETSTAT_CURRENT - NETSTAT_PREV) / 1024 )) # KB/s over 1 second
-                if [ "$DOWNLOAD_SPEED" -lt 0 ]; then
-                    DOWNLOAD_SPEED=0
-                fi
-                NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED} KB/s${reset}"
+                DOWNLOAD_CURRENT=$(echo "$NETSTAT_CURRENT" | awk '{print $1}')
+                UPLOAD_CURRENT=$(echo "$NETSTAT_CURRENT" | awk '{print $2}')
+                DOWNLOAD_PREV=$(echo "$NETSTAT_PREV" | awk '{print $1}')
+                UPLOAD_PREV=$(echo "$NETSTAT_PREV" | awk '{print $2}')
+                
+                DOWNLOAD_SPEED=$(( (DOWNLOAD_CURRENT - DOWNLOAD_PREV) / 1024 )) # KB/s over 1 second
+                UPLOAD_SPEED=$(( (UPLOAD_CURRENT - UPLOAD_PREV) / 1024 )) # KB/s over 1 second
+                
+                [ "$DOWNLOAD_SPEED" -lt 0 ] && DOWNLOAD_SPEED=0
+                [ "$UPLOAD_SPEED" -lt 0 ] && UPLOAD_SPEED=0
+                
+                NET_SPEED="${dbluef}↓ ${DOWNLOAD_SPEED} KB/s ↑ ${UPLOAD_SPEED} KB/s${reset}"
             else
-                NET_SPEED="${redf}↓ N/A${reset}"
+                NET_SPEED="${redf}↓ N/A ↑ N/A${reset}"
             fi
         else
-            NET_SPEED="${redf}↓ N/A${reset}"
+            NET_SPEED="${redf}↓ N/A ↑ N/A${reset}"
         fi
-        # Save current value for next iteration
+        # Save current values for next iteration
         [ -n "$NETSTAT_CURRENT" ] && echo "$NETSTAT_CURRENT" > "$NETSTAT_FILE"
         # Ensure at least 1-second gap for next sample
         sleep 1
